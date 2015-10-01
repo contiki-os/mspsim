@@ -36,6 +36,7 @@
  */
 
 package se.sics.mspsim.util;
+
 import java.io.BufferedInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
@@ -49,48 +50,47 @@ import se.sics.mspsim.debug.DwarfReader;
 import se.sics.mspsim.debug.StabDebug;
 
 public class ELF {
-
+  
   // private static final int EI_NIDENT = 16;
-  private static final int EI_ENCODING = 5;
-  private static final int[] MAGIC = new int[] {0x7f, 'E', 'L', 'F'};
+  private static final int    EI_ENCODING = 5;
+  private static final int[]  MAGIC       = new int[] { 0x7f, 'E', 'L', 'F' };
   
-  public static final boolean DEBUG = false;
+  public static final boolean DEBUG       = false;
   
+  boolean                     encMSB      = true;
+  int                         type;
+  int                         machine;
+  int                         version;
+  int                         entry;
+  int                         phoff;
+  int                         shoff;
+  int                         flags;
+  int                         ehsize;
+  int                         phentsize;
+  int                         phnum;
+  int                         shentsize;
+  int                         shnum;
+  int                         shstrndx;
   
-  boolean encMSB = true;
-  int type;
-  int machine;
-  int version;
-  int entry;
-  int phoff;
-  int shoff;
-  int flags;
-  int ehsize;
-  int phentsize;
-  int phnum;
-  int shentsize;
-  int shnum;
-  int shstrndx;
-
-  byte[] elfData;
-  private int pos = 0;
-
-  private ELFSection sections[];
-  private ELFProgram programs[];
-  private ArrayList<FileInfo> files = new ArrayList<FileInfo>();
-
-  ELFSection strTable;
-  ELFSection symTable;
-  ELFSection dbgStab;
-  public ELFSection dbgStabStr;
-
-  ELFDebug debug;
-
+  byte[]                      elfData;
+  private int                 pos         = 0;
+  
+  private ELFSection          sections[];
+  private ELFProgram          programs[];
+  private ArrayList<FileInfo> files       = new ArrayList<FileInfo>();
+  
+  ELFSection                  strTable;
+  ELFSection                  symTable;
+  ELFSection                  dbgStab;
+  public ELFSection           dbgStabStr;
+  
+  ELFDebug                    debug;
+  
   public ELF(byte[] data) {
     elfData = data;
     setPos(0);
   }
-
+  
   /* check if the file exists and is an ELF file */
   public static boolean isELF(File file) {
     try {
@@ -103,12 +103,12 @@ public class ELF {
       }
       input.close();
       return true;
-    } catch(IOException ioe) {
+    } catch (IOException ioe) {
       // ignore and return false - this is not an elf.
       return false;
     }
   }
-
+  
   private void readHeader() throws ELFException {
     for (int i = 0; i < MAGIC.length; i++) {
       if (elfData[i] != (byte) (MAGIC[i] & 0xff)) {
@@ -138,7 +138,7 @@ public class ELF {
     shentsize = readElf16();
     shnum = readElf16();
     shstrndx = readElf16();
-
+    
     if (DEBUG) {
       System.out.println("-- ELF Header --");
       System.out.println("type: " + Integer.toString(type, 16));
@@ -156,7 +156,7 @@ public class ELF {
       System.out.println("shstrndx: " + Integer.toString(shstrndx, 16));
     }
   }
-
+  
   private ELFSection readSectionHeader() {
     ELFSection sec = new ELFSection();
     sec.name = readElf32();
@@ -172,7 +172,7 @@ public class ELF {
     sec.elf = this;
     return sec;
   }
-
+  
   private ELFProgram readProgramHeader() {
     ELFProgram pHeader = new ELFProgram();
     pHeader.type = readElf32();
@@ -189,65 +189,65 @@ public class ELF {
     }
     return pHeader;
   }
-
+  
   public int getSectionCount() {
-      return shnum;
+    return shnum;
   }
-
+  
   public ELFSection getSection(int index) {
-      return sections[index];
+    return sections[index];
   }
-
+  
   public int readElf32() {
-      int val = readElf32(getPos());
-      setPos(getPos() + 4);
-      return val;
+    int val = readElf32(getPos());
+    setPos(getPos() + 4);
+    return val;
   }
-
+  
   public int readElf16() {
-      int val = readElf16(getPos());
-      setPos(getPos() + 2);
-      return val;
+    int val = readElf16(getPos());
+    setPos(getPos() + 2);
+    return val;
   }
   
   public int readElf8() {
-      int val = readElf16(getPos());
-      setPos(getPos() + 1);
-      return val;
+    int val = readElf16(getPos());
+    setPos(getPos() + 1);
+    return val;
   }
   
   int readElf32(int pos) {
     int b = 0;
     if (encMSB) {
       b = (elfData[pos++] & 0xff) << 24 |
-	((elfData[pos++] & 0xff) << 16) |
-	((elfData[pos++] & 0xff) << 8) |
-	(elfData[pos++] & 0xff);
+          (elfData[pos++] & 0xff) << 16 |
+          (elfData[pos++] & 0xff) << 8 |
+          (elfData[pos++] & 0xff);
     } else {
       b = (elfData[pos++] & 0xff) |
-	((elfData[pos++] & 0xff) << 8) |
-	((elfData[pos++] & 0xff) << 16) |
-	((elfData[pos++] & 0xff) << 24);
+          (elfData[pos++] & 0xff) << 8 |
+          (elfData[pos++] & 0xff) << 16 |
+          (elfData[pos++] & 0xff) << 24;
     }
     return b;
   }
-
+  
   int readElf16(int pos) {
     int b = 0;
     if (encMSB) {
-      b = ((elfData[pos++] & 0xff) << 8) |
-	(elfData[pos++] & 0xff);
+      b = (elfData[pos++] & 0xff) << 8 |
+          (elfData[pos++] & 0xff);
     } else {
       b = (elfData[pos++] & 0xff) |
-	((elfData[pos++] & 0xff) << 8);
+          (elfData[pos++] & 0xff) << 8;
     }
     return b;
   }
-
+  
   int readElf8(int pos) {
     return elfData[pos++] & 0xff;
   }
-
+  
   public static void printBytes(String name, byte[] data) {
     System.out.print(name + " ");
     for (byte element : data) {
@@ -255,58 +255,58 @@ public class ELF {
     }
     System.out.println("");
   }
-
+  
   private void readSections() {
     setPos(shoff);
-
+    
     sections = new ELFSection[shnum];
     for (int i = 0, n = shnum; i < n; i++) {
       sections[i] = readSectionHeader();
       if (sections[i].type == ELFSection.TYPE_SYMTAB) {
-	symTable = sections[i];
+        symTable = sections[i];
       }
       if (i == shstrndx) {
-	strTable = sections[i];
+        strTable = sections[i];
       }
     }
-
+    
     boolean readDwarf = false;
     /* Find sections */
     for (int i = 0, n = shnum; i < n; i++) {
-        String name = sections[i].getSectionName();
-        if (DEBUG) {
-          System.out.println("ELF-Section: " + name);
-        }
+      String name = sections[i].getSectionName();
+      if (DEBUG) {
+        System.out.println("ELF-Section: " + name);
+      }
       if (".stabstr".equals(name)) {
-	dbgStabStr = sections[i];
+        dbgStabStr = sections[i];
       }
       if (".stab".equals(name)) {
-	dbgStab = sections[i];
+        dbgStab = sections[i];
       }
-      if (".debug_aranges".equals(name) || 
+      if (".debug_aranges".equals(name) ||
           ".debug_line".equals(name)) {
-          readDwarf = true;
+        readDwarf = true;
       }
     }
     if (readDwarf) {
-        DwarfReader dwarf = new DwarfReader(this);
-        dwarf.read();
-        debug = dwarf;
+      DwarfReader dwarf = new DwarfReader(this);
+      dwarf.read();
+      debug = dwarf;
     }
-
+    
   }
-
+  
   private void readPrograms() {
     setPos(phoff);
     programs = new ELFProgram[phnum];
     for (int i = 0, n = phnum; i < n; i++) {
       programs[i] = readProgramHeader();
       if (DEBUG) {
-	System.out.println("-- Program header --\n" + programs[i].toString());
+        System.out.println("-- Program header --\n" + programs[i].toString());
       }
     }
   }
-
+  
   public void readAll() throws ELFException {
     readHeader();
     readPrograms();
@@ -315,20 +315,19 @@ public class ELF {
       debug = new StabDebug(this, dbgStab, dbgStabStr);
     }
   }
-
+  
   public void loadPrograms(int[] memory) {
     for (int i = 0, n = phnum; i < n; i++) {
       // paddr or vaddr???
       loadBytes(memory, programs[i].offset, programs[i].paddr,
-		programs[i].fileSize, programs[i].memSize);
+          programs[i].fileSize, programs[i].memSize);
     }
   }
-
-  private void loadBytes(int[] memory, int offset, int addr, int len,
-			 int fill) {
+  
+  private void loadBytes(int[] memory, int offset, int addr, int len, int fill) {
     if (DEBUG) {
       System.out.println("Loading " + len + " bytes into " +
-             Integer.toString(addr, 16) + " fill " + fill);
+          Integer.toString(addr, 16) + " fill " + fill);
     }
     for (int i = 0, n = len; i < n; i++) {
       memory[addr++] = elfData[offset++] & 0xff;
@@ -336,31 +335,31 @@ public class ELF {
     if (fill > len) {
       int n = fill - len;
       if (n + addr > memory.length) {
-	n = memory.length - addr;
+        n = memory.length - addr;
       }
       for (int i = 0; i < n; i++) {
-	memory[addr++] = 0;
+        memory[addr++] = 0;
       }
     }
   }
-
+  
   public ELFDebug getDebug() {
     return debug;
   }
-
+  
   public DebugInfo getDebugInfo(int adr) {
-      if (debug != null) {
-          return debug.getDebugInfo(adr);
-      }
-      return null;
+    if (debug != null) {
+      return debug.getDebugInfo(adr);
+    }
+    return null;
   }
-
+  
   public String lookupFile(int address) {
     if (debug != null) {
-        DebugInfo di = debug.getDebugInfo(address);
-        if (di != null) {
-            return di.getFile();
-        }
+      DebugInfo di = debug.getDebugInfo(address);
+      if (di != null) {
+        return di.getFile();
+      }
     }
     for (int i = 0; i < files.size(); i++) {
       FileInfo fi = files.get(i);
@@ -370,12 +369,12 @@ public class ELF {
     }
     return null;
   }
-
+  
   public MapTable getMap() {
     MapTable map = new MapTable();
     int sAddrHighest = -1;
     boolean foundEnd = false;
-
+    
     ELFSection name = sections[symTable.link];
     int len = symTable.size;
     int count = len / symTable.getEntrySize();
@@ -394,82 +393,82 @@ public class ELF {
       int info = readElf8();
       int bind = info >> 4;
       int type = info & 0xf;
-
-      if (type == ELFSection.SYMTYPE_NONE && sn != null){
+      
+      if (type == ELFSection.SYMTYPE_NONE && sn != null) {
         if ("Letext".equals(sn)) {
           if (currentFile != null) {
             files.add(new FileInfo(currentFile, currentAddress, sAddr));
             currentAddress = sAddr;
           }
         } else if (!sn.startsWith("_")) {
-            map.setEntry(new MapEntry(MapEntry.TYPE.variable, sAddr, 0, sn, currentFile,
-                    false));
+          map.setEntry(new MapEntry(MapEntry.TYPE.variable, sAddr, 0, sn, currentFile,
+              false));
         }
       }
       if (type == ELFSection.SYMTYPE_FILE) {
-	currentFile = sn;
+        currentFile = sn;
       }
-
+      
       if (DEBUG) {
         System.out.println("Found symbol: " + sn + " at " +
-        		   Integer.toString(sAddr, 16) + " bind: " + bind +
-        		   " type: " + type + " size: " + size);
+            Integer.toString(sAddr, 16) + " bind: " + bind +
+            " type: " + type + " size: " + size);
       }
-
+      
       if (sAddr > 0 && sAddr < 0x100000) {
-	String symbolName = sn;
-	
-	if (sAddr < 0x5c00 && sAddr > sAddrHighest && !sn.equals("__stack")) {
-	  sAddrHighest = sAddr;
-	}
-//	if (bind == ELFSection.SYMBIND_LOCAL) {
-//	  symbolName += " (" + currentFile + ')';
-//	}
-	if ("_end".equals(symbolName)) {
-      foundEnd = true;
-	  map.setHeapStart(sAddr);
-	} else if ("__stack".equals(symbolName)){
-	  map.setStackStart(sAddr);
-	}
-
-
-	if (type == ELFSection.SYMTYPE_FUNCTION) {
+        String symbolName = sn;
+        
+        if (sAddr < 0x5c00 && sAddr > sAddrHighest && !sn.equals("__stack")) {
+          sAddrHighest = sAddr;
+        }
+        // if (bind == ELFSection.SYMBIND_LOCAL) {
+        // symbolName += " (" + currentFile + ')';
+        // }
+        if ("_end".equals(symbolName)) {
+          foundEnd = true;
+          map.setHeapStart(sAddr);
+        } else if ("__stack".equals(symbolName)) {
+          map.setStackStart(sAddr);
+        }
+        
+        if (type == ELFSection.SYMTYPE_FUNCTION) {
           String file = lookupFile(sAddr);
           if (file == null) {
             file = currentFile;
           }
-	  map.setEntry(new MapEntry(MapEntry.TYPE.function, sAddr, 0, symbolName, file,
-	      bind == ELFSection.SYMBIND_LOCAL));
-	} else if (type == ELFSection.SYMTYPE_OBJECT) {
+          map.setEntry(new MapEntry(MapEntry.TYPE.function, sAddr, 0, symbolName, file,
+              bind == ELFSection.SYMBIND_LOCAL));
+        } else if (type == ELFSection.SYMTYPE_OBJECT) {
           String file = lookupFile(sAddr);
           if (file == null) {
             file = currentFile;
           }
-	  map.setEntry(new MapEntry(MapEntry.TYPE.variable, sAddr, size, symbolName, file,
-	      bind == ELFSection.SYMBIND_LOCAL));
-	} else {
-	  if (DEBUG) {
-	    System.out.println("Skipping entry: '" + symbolName + "' @ 0x" + Integer.toString(sAddr, 16) + " (" + currentFile + ")");
-	  }
-	}
-
+          map.setEntry(new MapEntry(MapEntry.TYPE.variable, sAddr, size, symbolName, file,
+              bind == ELFSection.SYMBIND_LOCAL));
+        } else {
+          if (DEBUG) {
+            System.out.println("Skipping entry: '" + symbolName + "' @ 0x" + Integer.toString(sAddr, 16) +
+                " (" + currentFile + ")");
+          }
+        }
+        
       }
       addr += symTable.getEntrySize();
     }
-
-  if (!foundEnd && sAddrHighest > 0) {
-    System.out.printf("Warning: Unable to parse _end symbol. I'm guessing that heap starts at 0x%05x\n", sAddrHighest);
-    map.setHeapStart(sAddrHighest);
-  }
-
+    
+    if (!foundEnd && sAddrHighest > 0) {
+      System.out.printf("Warning: Unable to parse _end symbol. I'm guessing that heap starts at 0x%05x\n", sAddrHighest);
+      map.setHeapStart(sAddrHighest);
+    }
+    
     return map;
   }
-
+  
   public static ELF readELF(String file) throws IOException {
     DataInputStream input = new DataInputStream(new FileInputStream(file));
     ByteArrayOutputStream baous = new ByteArrayOutputStream();
     byte[] buf = new byte[2048];
-    for(int read; (read = input.read(buf)) != -1; baous.write(buf, 0, read)) {
+    for (int read; (read = input.read(buf)) != -1; baous.write(buf, 0, read)) {
       ;
     }
     input.close();
@@ -478,16 +477,16 @@ public class ELF {
     if (DEBUG) {
       System.out.println("Length of data: " + data.length);
     }
-
+    
     ELF elf = new ELF(data);
     elf.readAll();
-
+    
     return elf;
   }
-
+  
   public static void main(String[] args) throws Exception {
     ELF elf = readELF(args[0]);
-
+    
     if (args.length < 2) {
       for (int i = 0, n = elf.shnum; i < n; i++) {
         if (DEBUG) {
@@ -515,32 +514,32 @@ public class ELF {
     if (args.length > 1) {
       DebugInfo dbg = elf.getDebugInfo(Integer.parseInt(args[1]));
       if (dbg != null) {
-	System.out.println("File: " + dbg.getFile());
-	System.out.println("Function: " + dbg.getFunction());
-	System.out.println("LineNo: " + dbg.getLine());
+        System.out.println("File: " + dbg.getFile());
+        System.out.println("Function: " + dbg.getFunction());
+        System.out.println("LineNo: " + dbg.getLine());
       }
     }
   }
-
+  
   public void setPos(int pos) {
     this.pos = pos;
   }
-
+  
   public int getPos() {
     return pos;
   }
-
+  
   private static class FileInfo {
-      public final String name;
-      public final int start;
-      public final int end;
-
-      FileInfo(String name, int start, int end) {
-          this.name = name;
-          this.start = start;
-          this.end = end;
-      }
-
+    public final String name;
+    public final int    start;
+    public final int    end;
+    
+    FileInfo(String name, int start, int end) {
+      this.name = name;
+      this.start = start;
+      this.end = end;
+    }
+    
   }
-
+  
 } // ELF
