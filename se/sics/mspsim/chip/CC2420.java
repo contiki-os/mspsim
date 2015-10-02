@@ -603,11 +603,17 @@ public class CC2420 extends Radio802154 implements USARTListener {
                   if (rxread == 0) {
                       rxCrc.setCRC(0);
                       rxlen = data & 0xff;
-                      //System.out.println("Starting to get packet at: " + rxfifoWritePos + " len = " + rxlen);
-                      decodeAddress = addressDecode;
-                      if (logLevel > INFO) log("RX: Start frame length " + rxlen);
-                      // FIFO pin goes high after length byte is written to RXFIFO
-                      setFIFO(true);
+
+                      if ( (rxlen < 9 && rxlen != 5) || (rxlen & 0x80) !=0) { // correct is 5 (ACK) or 9-127 (DATA)
+                        if (logLevel > INFO) log("Incorrect rxlen: " + rxlen + ", rejecting");
+                        rejectFrame();
+                      }
+                      else {
+                          decodeAddress = addressDecode;
+                          if (logLevel > INFO) log("RX: Start frame length " + rxlen);
+                          // FIFO pin goes high after length byte is written to RXFIFO
+                          setFIFO(true);
+                      }
                   } else if (rxread < rxlen - 1) {
                       /* As long as we are not in the length or FCF (CRC) we count CRC */
                       rxCrc.addBitrev(data & 0xff);
@@ -889,7 +895,8 @@ public class CC2420 extends Radio802154 implements USARTListener {
 
         if(txCursor == 0) {
           if ((data & 0xff) > 127) {
-            logger.logw(this, WarningType.EXECUTION, "CC2420: Warning - packet size too large: " + (data & 0xff));
+            logger.logw(this, WarningType.EXECUTION, "CC2420: Error - incorrect length field: " + (data & 0xff) + ", resetting the MSB");
+            data = data & 0x7f;
           }
         } else if (txCursor > 127) {
           logger.logw(this, WarningType.EXECUTION, "CC2420: Warning - TX Cursor wrapped");
@@ -1078,8 +1085,8 @@ public class CC2420 extends Radio802154 implements USARTListener {
   }
 
   private void txNext() {
-    if(txfifoPos <= memory[RAM_TXFIFO]) {
-      int len = memory[RAM_TXFIFO] & 0xff;
+    int len = memory[RAM_TXFIFO] & 0x7f; // length field is 7 bit, so considering only them as length
+    if(txfifoPos <= len) {
       if (txfifoPos == len - 1) {
           txCrc.setCRC(0);
           for (int i = 1; i < len - 1; i++) {
