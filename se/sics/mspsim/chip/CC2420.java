@@ -170,10 +170,14 @@ public class CC2420 extends Radio802154 implements USARTListener {
   public static final int RAM_PANID	= 0x168;
   public static final int RAM_SHORTADDR	= 0x16A;
 
+  public static final int NO_ADDRESS    = 0;
   public static final int SHORT_ADDRESS = 2;
-  public static final int LONG_ADDRESS = 3;
+  public static final int LONG_ADDRESS  = 3;
 
-  
+  public static final int FRAME_802154_2003 = 0;
+  public static final int FRAME_802154_2006 = 1;
+  public static final int FRAME_802154_2015 = 2;
+
   // The Operation modes of the CC2420
   public static final int MODE_TXRX_OFF = 0x00;
   public static final int MODE_RX_ON = 0x01;
@@ -564,6 +568,10 @@ public class CC2420 extends Radio802154 implements USARTListener {
   
   /* variables for the address recognition */
   int destinationAddressMode = 0;
+  int sourceAddressMode = 0;
+  int frameVersion = 0;
+  boolean panIDCompression = false;
+  boolean seqNoSuppression = false;
   boolean decodeAddress = false;
   /* Receive a byte from the radio medium
    * @see se.sics.mspsim.chip.RFListener#receivedByte(byte)
@@ -604,6 +612,9 @@ public class CC2420 extends Radio802154 implements USARTListener {
                       rxCrc.setCRC(0);
                       rxlen = data & 0xff;
                       //System.out.println("Starting to get packet at: " + rxfifoWritePos + " len = " + rxlen);
+                      panIDCompression = false;
+                      seqNoSuppression = false;
+                      frameVersion = 0;
                       decodeAddress = addressDecode;
                       if (logLevel > INFO) log("RX: Start frame length " + rxlen);
                       // FIFO pin goes high after length byte is written to RXFIFO
@@ -619,6 +630,10 @@ public class CC2420 extends Radio802154 implements USARTListener {
                           if (frameType == TYPE_DATA_FRAME || frameType == TYPE_CMD_FRAME) {
                               ackRequest = (fcf0 & ACK_REQUEST) > 0;
                               destinationAddressMode = (fcf1 >> 2) & 3;
+                              sourceAddressMode = (fcf1 >> 6) & 3;
+                              panIDCompression = (fcf0 & 0x40) == 0x40;
+                              seqNoSuppression = (fcf1 & 0x01) == 0x01;
+                              frameVersion = (fcf1 >> 4) & 3;
                               /* check this !!! */
                               if (addressDecode && destinationAddressMode != LONG_ADDRESS &&
                                       destinationAddressMode != SHORT_ADDRESS) {
@@ -637,21 +652,149 @@ public class CC2420 extends Radio802154 implements USARTListener {
                           dsn = data & 0xff;
                       } else if (decodeAddress) {
                           boolean flushPacket = false;
+
                           /* here we decode the address !!! */
-                          if (destinationAddressMode == LONG_ADDRESS && rxread == 8 + 5) {
-                              /* here we need to check that this address is correct compared to the stored address */
-                              flushPacket = !rxFIFO.tailEquals(memory, RAM_IEEEADDR, 8);
-                              flushPacket |= !rxFIFO.tailEquals(memory, RAM_PANID, 2, 8)
-                                      && !rxFIFO.tailEquals(BC_ADDRESS, 0, 2, 8);
+                          if (frameVersion == FRAME_802154_2015) {
+                            if (destinationAddressMode == SHORT_ADDRESS &&
+                                sourceAddressMode == NO_ADDRESS &&
+                                panIDCompression == true &&
+                                ((seqNoSuppression == true && rxread == 4) ||
+                                 (seqNoSuppression == false && rxread == 5))) {
+                              /*
+                               * rxFIFO: ||PHR(1)||FCF(2)|SeqNo(0/1)|Dest Addr(2)|
+                               *
+                               * contiki/regression-tests/25-ieee802154/code/test-panid-handling.c:
+                               *    dest_addr, src_addr, dest_panid,  src_panid,   panid_cmp
+                               * {  SHORT,     NO_ADDR,  NOT_PRESENT, NOT_PRESENT, ON},  // index 3,  row-4-1
+                               */
+                              flushPacket = !rxFIFO.tailEquals(BC_ADDRESS, 0, 2) && !rxFIFO.tailEquals(memory, RAM_SHORTADDR, 2);
                               decodeAddress = false;
-                          } else if (destinationAddressMode == SHORT_ADDRESS && rxread == 2 + 5){
-                              /* should check short address */
-                              flushPacket = !rxFIFO.tailEquals(BC_ADDRESS, 0, 2)
-                                      && !rxFIFO.tailEquals(memory, RAM_SHORTADDR, 2);
-                              flushPacket |= !rxFIFO.tailEquals(memory, RAM_PANID, 2, 2)
-                                      && !rxFIFO.tailEquals(BC_ADDRESS, 0, 2, 2);
+                            } else if (destinationAddressMode == LONG_ADDRESS &&
+                                       sourceAddressMode != SHORT_ADDRESS && panIDCompression == true &&
+                                       ((seqNoSuppression == true && rxread == 10) ||
+                                        (seqNoSuppression == false && rxread == 11))) {
+                              char octet0;
+                              /*
+                               * rxFIFO: ||PHR(1)||FCF(2)|SeqNo(0/1)|Dest Addr(8)|
+                               *
+                               * contiki/regression-tests/25-ieee802154/code/test-panid-handling.c:
+                               *    dest_addr, src_addr, dest_panid,  src_panid,   panid_cmp
+                               * {  LONG,      LONG,     NOT_PRESENT, NOT_PRESENT, ON},  // index 7,  row-8
+                               * {  LONG,      NO_ADDR,  NOT_PRESENT, NOT_PRESENT, ON},  // index 15, row-4-2
+                               */
+                              if (seqNoSuppression == true ) {
+                                octet0 = (char)rxFIFO.peek(10);
+                              } else {
+                                octet0 = (char)rxFIFO.peek(11);
+                              }
+                              flushPacket = !rxFIFO.tailEquals(memory, RAM_IEEEADDR, 8) &&
+                                !((octet0 & 0x01) == 0x01); /* Test the I/G bit */
                               decodeAddress = false;
+                            } else if (destinationAddressMode == SHORT_ADDRESS &&
+                                       ((sourceAddressMode == NO_ADDRESS && panIDCompression == false) ||
+                                        sourceAddressMode != NO_ADDRESS) &&
+                                       ((seqNoSuppression == true && rxread == 6) ||
+                                        (seqNoSuppression == false && rxread == 7))) {
+                              /*
+                               * rxFIFO: ||PHR(1)||FCF(2)|SeqNo(0/1)|Dest PAN ID(2)|Dest Addr(2)|
+                               *
+                               * contiki/regression-tests/25-ieee802154/code/test-panid-handling.c:
+                               *    dest_addr, src_addr, dest_panid,  src_panid,   panid_cmp
+                               * {  SHORT,     NO_ADDR,  PRESENT,     NOT_PRESENT, OFF}, // index 2,  row-3-1
+                               * {  SHORT,     SHORT,    PRESENT,     PRESENT,     OFF}, // index 8,  row-9,  *1
+                               * {  SHORT,     SHORT,    PRESENT,     NOT_PRESENT, ON},  // index 13, row-14, *2
+                               * {  SHORT,     LONG,     PRESENT,     PRESENT,     OFF}, // index 9,  row-10, *1
+                               * {  SHORT,     LONG,     PRESENT,     NOT_PRESENT, ON},  // index 11, row-12, *2
+                               */
+                              flushPacket = !rxFIFO.tailEquals(BC_ADDRESS, 0, 2) && !rxFIFO.tailEquals(memory, RAM_SHORTADDR, 2);
+                              flushPacket |= !rxFIFO.tailEquals(memory, RAM_PANID, 2, 2);
+                              decodeAddress = false;
+                            } else if (destinationAddressMode == LONG_ADDRESS &&
+                                       ((sourceAddressMode == SHORT_ADDRESS && panIDCompression == true) ||
+                                        panIDCompression == false) &&
+                                       ((seqNoSuppression == true && rxread == 12) ||
+                                        (seqNoSuppression == false && rxread == 13))) {
+                              char octet0;
+                              /*
+                               * rxFIFO: ||PHR(1)||FCF(2)|SeqNo(0/1)|Dest PAN ID(2)|Dest Addr(8)|
+                               *
+                               * contiki/regression-tests/25-ieee802154/code/test-panid-handling.c:
+                               *    dest_addr, src_addr, dest_panid,  src_panid,   panid_cmp
+                               * {  LONG,      SHORT,    PRESENT,     NOT_PRESENT, ON},  // index 12, row-13, *2
+                               * {  LONG,      SHORT,    PRESENT,     PRESENT,     OFF}, // index 10, row-11, *1
+                               * {  LONG,      LONG,     PRESENT,     NOT_PRESENT, OFF}, // index 6,  row-7
+                               * {  LONG,      NO_ADDR,  PRESENT,     NOT_PRESENT, OFF}, // index 14, row-3-2
+                               */
+                              if (seqNoSuppression) {
+                                octet0 = (char)rxFIFO.peek(12);
+                              } else {
+                                octet0 = (char)rxFIFO.peek(13);
+                              }
+                              flushPacket = !rxFIFO.tailEquals(memory, RAM_IEEEADDR, 8) &&
+                                !((octet0 & 0x01) == 0x01); /* Test the I/G bit */
+                              flushPacket |= !rxFIFO.tailEquals(memory, RAM_PANID, 2, 8);
+                              decodeAddress = false;
+                            } else if (destinationAddressMode == NO_ADDRESS &&
+                                       sourceAddressMode == NO_ADDRESS &&
+                                       panIDCompression == true &&
+                                       ((seqNoSuppression == true && rxread == 4) ||
+                                        (seqNoSuppression == false && rxread == 5))) {
+                              /*
+                               * rxFIFO: ||PHR(1)||FCF(2)|SeqNo(0/1)|Dest PAN ID(2)|
+                               *
+                               * contiki/regression-tests/25-ieee802154/code/test-panid-handling.c:
+                               *    dest_addr, src_addr, dest_panid,  src_panid,   panid_cmp
+                               * {  NO_ADDR,   NO_ADDR,  PRESENT,     NOT_PRESENT, ON},  // index 1,  row-2
+                               */
+                              flushPacket |= !rxFIFO.tailEquals(memory, RAM_PANID, 2);
+                              decodeAddress = false;
+                            }
+                          } else if (frameVersion == FRAME_802154_2003 ||
+                                     frameVersion == FRAME_802154_2006) {
+                            if (destinationAddressMode == SHORT_ADDRESS &&
+                                ((seqNoSuppression == true && rxread == 6) ||
+                                 (seqNoSuppression == false && rxread == 7))) {
+                              /*
+                               * rxFIFO: ||PHR(1)||FCF(2)|SeqNo(0/1)|Dest PAN ID(2)|Dest Addr(2)|
+                               *
+                               * contiki/regression-tests/25-ieee802154/code/test-panid-handling.c:
+                               *    dest_addr, src_addr, dest_panid,  src_panid,   panid_cmp
+                               * {  SHORT,     SHORT,    PRESENT,     NOT_PRESENT, ON},
+                               * {  SHORT,     LONG,     PRESENT,     NOT_PRESENT, ON},
+                               * {  SHORT,     SHORT,    PRESENT,     PRESENT,     OFF},
+                               * {  SHORT,     LONG,     PRESENT,     PRESENT,     OFF},
+                               * {  SHORT,     NO_ADDR,  PRESENT,     NOT_PRESENT, OFF},
+                               */
+                              flushPacket = !rxFIFO.tailEquals(BC_ADDRESS, 0, 2) && !rxFIFO.tailEquals(memory, RAM_SHORTADDR, 2);
+                              flushPacket |= !rxFIFO.tailEquals(memory, RAM_PANID, 2, 2);
+                              decodeAddress = false;
+                            } else if (destinationAddressMode == LONG_ADDRESS &&
+                                ((seqNoSuppression == true && rxread == 12) ||
+                                 (seqNoSuppression == false && rxread == 13))) {
+                              char octet0;
+                              /*
+                               * rxFIFO: ||PHR(1)||FCF(2)|SeqNo(0/1)|Dest PAN ID(2)|Dest Addr(8)|
+                               *
+                               * contiki/regression-tests/25-ieee802154/code/test-panid-handling.c:
+                               *    dest_addr, src_addr, dest_panid,  src_panid,   panid_cmp
+                               * {  LONG,      SHORT,    PRESENT,     PRESENT,     OFF},
+                               * {  LONG,      SHORT,    PRESENT,     NOT_PRESENT, ON},
+                               * {  LONG,      LONG,     PRESENT,     NOT_PRESENT, ON},
+                               * {  LONG,      LONG,     PRESENT,     PRESENT,     OFF},
+                               * {  LONG,      NO_ADDR,  PRESENT,     NOT_PRESENT, OFF},
+                               */
+                              if (seqNoSuppression) {
+                                octet0 = (char)rxFIFO.peek(12);
+                              } else {
+                                octet0 = (char)rxFIFO.peek(13);
+                              }
+                              flushPacket = !rxFIFO.tailEquals(memory, RAM_IEEEADDR, 8) &&
+                                !((octet0 & 0x01) == 0x01); /* Test the I/G bit */
+                              flushPacket |= !rxFIFO.tailEquals(memory, RAM_PANID, 2, 8);
+                              decodeAddress = false;
+                            }
                           }
+
                           if (flushPacket) {
                               rejectFrame();
                           }
